@@ -1,0 +1,4 @@
+echo 'building for windows'
+set -e
+x86_64-w64-mingw32-gcc win.c -o win.exe -std=c89 -luser32 -lkernel32 -lgdi32
+wine win.exe
