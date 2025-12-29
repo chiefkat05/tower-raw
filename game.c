@@ -16,8 +16,8 @@ typedef const char * cstr;
 typedef char * str;
 #define strlen(s) sizeof(s)/sizeof(s[0])
 
-#define SCREEN_WIDTH 1600
-#define SCREEN_HEIGHT 900
+#define SCREEN_WIDTH 256
+#define SCREEN_HEIGHT 256
 
 #define PRESSED 1
 #define RELEASED 0
@@ -61,16 +61,28 @@ bool inputJustPressed(InputCode input)
 typedef struct
 {
     void *data;
-    uint width;
-    uint height;
+    int width;
+    int height;
     uint bytes_per_pixel;
 } PixelBuffer;
 static PixelBuffer screen_buffer;
 
 static bool running;
 
-void drawPixel(int xpos, int ypos, u8 red, u8 green, u8 blue)
+void drawPixel(int xpos, int ypos, u8 red, u8 green, u8 blue, bool looping)
 {
+    if (looping)
+    {
+        while (xpos >= screen_buffer.width)
+        { xpos -= screen_buffer.width; }
+        while (xpos < 0)
+        { xpos += screen_buffer.width; }
+        while (ypos >= screen_buffer.height)
+        { ypos -= screen_buffer.height; }
+        while (ypos < 0)
+        { ypos += screen_buffer.height; }
+    }
+
     if (xpos >= screen_buffer.width || xpos < 0 || ypos >= screen_buffer.height || ypos < 0)
     { return; }
 
@@ -89,20 +101,72 @@ void drawRect(int xpos, int ypos, int width, int height)
         u32 *pixel = (u32 *)(row) + xpos;
         for (x = 0; x < width; ++x)
         {
-            drawPixel(xpos + x, ypos + y, 255, 100, 150);
+            drawPixel(xpos + x, ypos + y, 255, 100, 150, false);
         }
         row += pitch;
     }
 }
-void clearScreen()
+
+typedef enum
 {
-    u8 *row = (u8 *)(screen_buffer.data);
-    int pitch = screen_buffer.width * screen_buffer.bytes_per_pixel;
+    PARTICLE_SNOW
+} ParticleStyle;
+
+#define MAX_PARTICLES 200
+typedef struct
+{
+    ParticleStyle style;
+    int x, y, w, h;
+
+    float x_positions[MAX_PARTICLES];
+    float y_positions[MAX_PARTICLES];
+    float x_velocity[MAX_PARTICLES];
+    float y_velocity[MAX_PARTICLES];
+    int particle_count;
+} ParticleManager;
+
+void particleManagerAdd(ParticleManager *manager, float xpos, float ypos)
+{
+    manager->x_positions[manager->particle_count] = xpos;
+    manager->y_positions[manager->particle_count] = ypos;
+    ++manager->particle_count;
+}
+void particleManagerPush(ParticleManager *manager, float xpush, float ypush)
+{
+    manager->x_velocity[manager->particle_count - 1] = xpush;
+    manager->y_velocity[manager->particle_count - 1] = ypush;
+}
+#include <time.h>
+void particleManagerGenerate(ParticleManager *manager)
+{
+    srand(time(0));
+    int i;
+    for (i = 0; i < MAX_PARTICLES; ++i)
+    {
+        particleManagerAdd(manager, rand() % screen_buffer.width, rand() % screen_buffer.height);
+        particleManagerPush(manager, (float)(rand() % 400 + 300.0) / 12000.0, -(float)(rand() % 400 + 300.0) / 12000.0);
+    }
+}
+void particleManagerUpdateAndDraw(ParticleManager *manager)
+{
+    int p;
+    for (p = 0; p < manager->particle_count; ++p)
+    {
+        drawPixel(manager->x_positions[p], manager->y_positions[p], 255, 255, 255, true);
+        manager->x_positions[p] += manager->x_velocity[p];
+        manager->y_positions[p] += manager->y_velocity[p];
+    }
+}
+
+void clearScreen(PixelBuffer *screen)
+{
+    u8 *row = (u8 *)(screen->data);
+    int pitch = screen->width * screen->bytes_per_pixel;
     int x, y;
-    for (y = 0; y < screen_buffer.height; ++y)
+    for (y = 0; y < screen->height; ++y)
     {
         u32 *pixel = (u32 *)row;
-        for (x = 0; x < screen_buffer.width; ++x)
+        for (x = 0; x < screen->width; ++x)
         {
             *pixel++ = 0;
         }

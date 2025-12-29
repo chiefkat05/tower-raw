@@ -12,27 +12,54 @@ void print(cstr msg)
 
 LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
 
+static int WinWidth, WinHeight, WinOffset;
+static float WinAspect;
 static BITMAPINFO bmInfo;
-int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
+void getWindowSize(HWND window)
 {
-    WNDCLASS class = {
-        .lpfnWndProc = WinProc,
-        .hInstance = inst,
-        .lpszClassName = "Window Class",
-        .style = CS_HREDRAW | CS_VREDRAW
+    RECT winRect;
+    GetClientRect(window, &winRect);
+    WinWidth = winRect.right - winRect.left;
+    WinHeight = winRect.bottom - winRect.top;
+    WinAspect = (float)WinWidth / (float)WinHeight;
+    WinOffset = WinWidth / 4;
+}
+void clearEntireWindow(HDC context)
+{
+    PixelBuffer window_buffer = {
+        .width = WinWidth,
+        .height = WinHeight,
+        .bytes_per_pixel = 4
+    };
+    BITMAPINFOHEADER bmHeader = {
+        .biSize = sizeof(bmHeader),
+        .biWidth = window_buffer.width,
+        .biHeight = window_buffer.height,
+        .biPlanes = 1,
+        .biBitCount = 8 * window_buffer.bytes_per_pixel,
+        .biCompression = BI_RGB
+    };
+    BITMAPINFO bitmapInfo = (BITMAPINFO){
+        .bmiHeader = bmHeader
     };
 
-    RegisterClass(&class);
+    window_buffer.data = VirtualAlloc(0, 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    verify(window_buffer.data != NULL, "failed to allocate window buffer data");
 
-    HWND window = CreateWindowExA(
-            0, class.lpszClassName, "Tower", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-            0, 0, inst, 0);
+    u8 *byte = (u8 *)window_buffer.data;
+    *byte = 0;
+    StretchDIBits(context, 0, 0, window_buffer.width, window_buffer.height,
+        0, 0, 1, 1,
+        window_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
 
-    verify(window != NULL, "failed to create window");
+    VirtualFree(window_buffer.data, 0, MEM_RELEASE);
+}
+void windowResize(HWND window)
+{
+    if (screen_buffer.data)
+    { VirtualFree(screen_buffer.data, 0, MEM_RELEASE); }
 
-    HDC context = GetDC(window);
-
+    getWindowSize(window);
     screen_buffer = (PixelBuffer){
             .width = SCREEN_WIDTH,
             .height = SCREEN_HEIGHT,
@@ -51,15 +78,43 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
         .bmiHeader = bmHeader
     };
 
-
-    ShowWindow(window, show);
-    running = true;
-
     int memory_size = screen_buffer.width * screen_buffer.height * screen_buffer.bytes_per_pixel;
     screen_buffer.data = VirtualAlloc(0, memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     verify(screen_buffer.data != NULL, "failed to allocate screen buffer data");
 
-    int playerx = 0, playery = 0;
+    HDC context = GetDC(window);
+    clearEntireWindow(context);
+}
+
+int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
+{
+    
+    WNDCLASS class = {
+        .lpfnWndProc = WinProc,
+        .hInstance = inst,
+        .lpszClassName = "Window Class",
+        .style = CS_HREDRAW | CS_VREDRAW
+    };
+
+    RegisterClass(&class);
+
+    HWND window = CreateWindowExA(
+            0, class.lpszClassName, "Tower", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            0, 0, inst, 0);
+
+    verify(window != NULL, "failed to create window");
+
+    HDC context = GetDC(window);
+    
+    windowResize(window);
+
+    ShowWindow(window, show);
+    running = true;
+
+    float playerx = 0.0f, playery = 0.0f;
+    ParticleManager snow = {.style=PARTICLE_SNOW, .x = 0, .y = 0, .w = 256, .h = 256};
+    particleManagerGenerate(&snow);
 
     while (running)
     {
@@ -71,31 +126,30 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
             DispatchMessage(&msg);
         }
 
+        const float speed = 0.2f;
         if (inputGet(KEY_W))
         {
-            ++playery;
+            playery += speed;
         }
         if (inputGet(KEY_A))
         {
-            --playerx;
+            playerx -= speed;
         }
         if (inputGet(KEY_S))
         {
-            --playery;
+            playery -= speed;
         }
         if (inputGet(KEY_D))
         {
-            ++playerx;
+            playerx += speed;
         }
 
-        clearScreen();
-        drawRect(playerx, playery, 64, 64);
-        RECT winRect;
-        GetClientRect(window, &winRect);
-        int w, h;
-        w = winRect.right - winRect.left;
-        h = winRect.bottom - winRect.top;
-        StretchDIBits(context, 0, 0, w, h, 0, 0, screen_buffer.width, screen_buffer.height, screen_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
+        clearScreen(&screen_buffer);
+        drawRect(playerx, playery, 16, 16);
+        particleManagerUpdateAndDraw(&snow);
+        StretchDIBits(context, WinOffset, 0, WinHeight, WinHeight,
+            0, 0, screen_buffer.width, screen_buffer.height,
+            screen_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
     }
 
     if (screen_buffer.data)
@@ -110,6 +164,11 @@ LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
     {
         running = false;
         PostQuitMessage(0);
+        return 0;
+    }
+    if (msg == WM_SIZE)
+    {
+        windowResize(window);
         return 0;
     }
     if (msg == WM_KEYDOWN || msg == WM_KEYUP)
