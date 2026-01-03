@@ -1,30 +1,45 @@
 #ifdef _WIN32
 
 #include <windows.h>
-#include <debugapi.h>
 
 #include "game.c"
 
-void print(cstr msg)
+static void *Allocate(u32 bytes)
 {
-    MessageBox(NULL, msg, "Program Failure", MB_OK);
+    return VirtualAlloc(0, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+}
+static void Free(void *data)
+{
+    VirtualFree(data, 0, MEM_RELEASE);
 }
 
 LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
 
-static int WinWidth, WinHeight, WinOffset;
+static int WinWidth, WinHeight, WinOffsetX, WinOffsetY;
+static int ScreenScaleX, ScreenScaleY;
 static float WinAspect;
 static BITMAPINFO bmInfo;
-void getWindowSize(HWND window)
+static void getWindowSize(HWND window)
 {
     RECT winRect;
     GetClientRect(window, &winRect);
     WinWidth = winRect.right - winRect.left;
     WinHeight = winRect.bottom - winRect.top;
-    WinAspect = (float)WinWidth / (float)WinHeight;
-    WinOffset = WinWidth / 4;
+    WinAspect = WinWidth / WinHeight;
+
+    float aspectDiff = (float)WinAspect / SCREEN_ASPECT;
+    /* side closest to it's screen_width cousin */
+    float WidthDiff = (float)WinWidth / (float)SCREEN_WIDTH;
+    float HeightDiff = (float)WinHeight / (float)SCREEN_HEIGHT;
+    float widthAspect = WidthDiff / min(WidthDiff, HeightDiff);
+    float heightAspect = HeightDiff / min(WidthDiff, HeightDiff);
+
+    ScreenScaleX = (float)WinWidth / widthAspect;
+    ScreenScaleY = (float)WinHeight / heightAspect;
+    WinOffsetX = WinWidth / 2 - (ScreenScaleX / 2.0f);
+    WinOffsetY = WinHeight / 2 - (ScreenScaleY / 2.0f);
 }
-void clearEntireWindow(HDC context)
+static void clearEntireWindow(HDC context)
 {
     PixelBuffer window_buffer = {
         .width = WinWidth,
@@ -54,12 +69,47 @@ void clearEntireWindow(HDC context)
 
     VirtualFree(window_buffer.data, 0, MEM_RELEASE);
 }
-void windowResize(HWND window)
+static void windowResize(HWND window)
 {
     if (screen_buffer.data)
     { VirtualFree(screen_buffer.data, 0, MEM_RELEASE); }
 
     getWindowSize(window);
+
+    HDC context = GetDC(window);
+    clearEntireWindow(context);
+}
+
+static LARGE_INTEGER currentTime, prevTime, freqTime;
+static float getDeltaTime()
+{
+    prevTime = currentTime;
+    QueryPerformanceCounter(&currentTime);
+    unsigned long deltaCycles = currentTime.QuadPart - prevTime.QuadPart;
+
+    return (float)(deltaCycles) / (float)freqTime.QuadPart;
+}
+
+int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
+{
+    WNDCLASS class = {
+        .lpfnWndProc = WinProc,
+        .hInstance = inst,
+        .lpszClassName = "Window Class",
+        .style = CS_HREDRAW | CS_VREDRAW
+    };
+
+    RegisterClass(&class);
+
+    HWND window = CreateWindowExA(
+            0, class.lpszClassName, "Tower", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            0, 0, inst, 0);
+
+    verify(window != NULL, "failed to create window");
+
+    HDC context = GetDC(window);
+    
     screen_buffer = (PixelBuffer){
             .width = SCREEN_WIDTH,
             .height = SCREEN_HEIGHT,
@@ -82,43 +132,18 @@ void windowResize(HWND window)
     screen_buffer.data = VirtualAlloc(0, memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     verify(screen_buffer.data != NULL, "failed to allocate screen buffer data");
 
-    HDC context = GetDC(window);
-    clearEntireWindow(context);
-}
 
-int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
-{
-    
-    WNDCLASS class = {
-        .lpfnWndProc = WinProc,
-        .hInstance = inst,
-        .lpszClassName = "Window Class",
-        .style = CS_HREDRAW | CS_VREDRAW
-    };
-
-    RegisterClass(&class);
-
-    HWND window = CreateWindowExA(
-            0, class.lpszClassName, "Tower", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-            0, 0, inst, 0);
-
-    verify(window != NULL, "failed to create window");
-
-    HDC context = GetDC(window);
-    
     windowResize(window);
 
     ShowWindow(window, show);
     running = true;
 
-    float playerx = 0.0f, playery = 0.0f;
-    ParticleManager snow = {.style=PARTICLE_SNOW, .x = 0, .y = 0, .w = 256, .h = 256};
-    particleManagerGenerate(&snow);
+    gameInit();
+    QueryPerformanceFrequency(&freqTime);
+    getDeltaTime();
 
     while (running)
     {
-        inputUpdate();
         MSG msg = {};
         while (PeekMessageA(&msg, window, 0, 0, PM_REMOVE) > 0)
         {
@@ -126,31 +151,15 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
             DispatchMessage(&msg);
         }
 
-        const float speed = 0.2f;
-        if (inputGet(KEY_W))
-        {
-            playery += speed;
-        }
-        if (inputGet(KEY_A))
-        {
-            playerx -= speed;
-        }
-        if (inputGet(KEY_S))
-        {
-            playery -= speed;
-        }
-        if (inputGet(KEY_D))
-        {
-            playerx += speed;
-        }
-
-        clearScreen(&screen_buffer);
-        drawRect(playerx, playery, 16, 16);
-        particleManagerUpdateAndDraw(&snow);
-        StretchDIBits(context, WinOffset, 0, WinHeight, WinHeight,
+        gameLoop();
+        StretchDIBits(context,
+            WinOffsetX, WinOffsetY,
+            ScreenScaleX, ScreenScaleY,
             0, 0, screen_buffer.width, screen_buffer.height,
             screen_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
     }
+
+    gameExit();
 
     if (screen_buffer.data)
     { VirtualFree(screen_buffer.data, 0, MEM_RELEASE); }
