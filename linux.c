@@ -5,6 +5,7 @@
 #include <xcb/xcb_image.h>
 #include <unistd.h>
 #include <time.h>
+#include <fcntl.h>
 
 #include "game.c"
 
@@ -175,6 +176,7 @@ int main()
 
         pixelImageScale(screen_data_flipped, screen_buffer.width, screen_buffer.height,
                         window_buffer, win_width, win_height);
+        /* make a screenscaled buffer and have it go screenbuf->flipbuf->scalebuf->windowbuf */
 
         xcb_image_t *img = xcb_image_create_native(connection, win_width, win_height,
                 XCB_IMAGE_FORMAT_Z_PIXMAP, screen->root_depth, window_buffer,

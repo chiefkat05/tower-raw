@@ -3,7 +3,7 @@
 
 #include "global_definitions.h"
 
-#define random(min, height) rand() % ((height) - (min)) + min
+#define random(min, height) (rand() % ((height) - (min)) + min)
 #define PI 3.1415926535f
 
 float lerp(float x, float y, float a)

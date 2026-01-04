@@ -11,6 +11,9 @@
 static void *Allocate(u32 bytes);
 static void Free(void *data);
 
+static void readFile(cstr path, void *out, u64 size);
+static void writeFile(cstr path, void *in, u64 size);
+
 #define SPAWNX 10.0f
 #define SPAWNY 60.0f
 typedef struct
@@ -18,6 +21,7 @@ typedef struct
     float playerx, playery, prevplayerx, prevplayery, playerfallspeed;
     bool playerjumped;
     ParticleSystem snow;
+    ParticleSystem playerdust;
 
     SoundStream music;
     Sound step;
@@ -33,7 +37,8 @@ static void gameInit()
 
     game.playerx = SPAWNX;
     game.playery = SPAWNY;
-    game.snow = (ParticleSystem){.style=PARTICLE_SNOW, .x = 0, .y = 0, .w = screen_buffer.width, .h = screen_buffer.height};
+    particleSystemInit(&game.snow, PARTICLE_SNOW);
+    particleSystemInit(&game.playerdust, PARTICLE_DUST);
 
     audioInit();
     audioStreamInit(&game.music, 128);
@@ -56,8 +61,9 @@ static void gameLoop()
 
     audioStreamUpdateBuffers(&game.music, 128);
 
-    const float speed = 80.0f * TICK_SPEED;
-    const float gravity = 8.0f * TICK_SPEED;
+    const float speed = 160.0f * TICK_SPEED;
+    float tspeed = 0.0f;
+    const float gravity = 320.0f * TICK_SPEED;
     if (inputJustPressed(KEY_X))
     { audioPlay(&game.step); }
 
@@ -73,14 +79,15 @@ static void gameLoop()
         }
         if (game.playery > 60.0)
         {
-            /* make the velocity work at any tickspeeds and such (something to do with dividing by half or something idk) */
-            game.playery += game.playerfallspeed;
             game.playerjumped = true;
-            game.playerfallspeed -= gravity;
+            game.playerfallspeed -= gravity * TICK_SPEED / 2;
         } else
         {
             if (game.playerjumped)
-            { audioPlay(&game.step); }
+            {
+                audioPlay(&game.step);
+                particleSystemGenerate(&game.playerdust, 15, 15, game.playerx, game.playerx + 20, game.playery, game.playery);
+            }
             game.playery = 60.0;
             game.playerjumped = false;
             game.playerfallspeed = 0.0f;
@@ -89,16 +96,22 @@ static void gameLoop()
         {
             audioPlay(&game.step);
             game.playerfallspeed = 200.0f * TICK_SPEED;
-            game.playery += game.playerfallspeed;
             game.playerjumped = true;
         }
         if (inputGet(KEY_A))
         {
-            game.playerx -= speed;
+            tspeed = -speed;
         }
         if (inputGet(KEY_D))
         {
-            game.playerx += speed;
+            tspeed = speed;
+        }
+
+        game.playery += game.playerfallspeed;
+        game.playerx += tspeed;
+        if (game.playery > 60.0)
+        {
+            game.playerfallspeed -= gravity * TICK_SPEED / 2;
         }
 
         static float timer = 0.0f;
@@ -106,25 +119,27 @@ static void gameLoop()
         if (timer <= 0.0f)
         {
             timer = 1.0f;
-            particleManagerGenerate(&game.snow, 1, MAX_PARTICLES);
+            particleSystemGenerate(&game.snow, 1, MAX_PARTICLES, 0, screen_buffer.width, screen_buffer.height - 1, screen_buffer.height - 1);
         }
-        particleManagerUpdate(&game.snow);
+        particleSystemUpdate(&game.snow);
+        particleSystemUpdate(&game.playerdust);
 
         accumulatedTime -= TICK_SPEED;
     }
+    clearScreen(&screen_buffer);
+
+    /* player (please fix the pxAlpha and pyAlpha to be not wiggly) */
     float pxAlpha = lerp(game.prevplayerx, game.playerx, accumulatedTime);
     float pyAlpha = lerp(game.prevplayery, game.playery, accumulatedTime);
+    imageDraw(&game.plImg, game.playerx, game.playery);
+    particleSystemDraw(&game.playerdust, accumulatedTime);
 
-    clearScreen(&screen_buffer);
-    
+
     /* floor */
-    drawRect(SCREEN_WIDTH / 2, 20, SCREEN_WIDTH, 40, 140, 140, 50);
+    drawRect(0, 20, SCREEN_WIDTH, 40, 140, 140, 50);
 
     /* snow */
-    particleManagerDraw(&game.snow, accumulatedTime);
-
-    /* player */
-    imageDraw(&game.plImg, game.playerx, game.playery);
+    particleSystemDraw(&game.snow, accumulatedTime);
 
     inputUpdate();
 }

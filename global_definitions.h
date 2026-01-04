@@ -43,34 +43,6 @@ static bool running;
 #define TICK_SPEED 10.0f / 1000.0f
 static float getDeltaTime();
 
-/* particles */
-
-typedef enum
-{
-    PARTICLE_SNOW
-} ParticleStyle;
-
-#define MAX_PARTICLES 9000
-typedef struct
-{
-    ParticleStyle style;
-    int x, y, w, h;
-
-    float prev_x_positions[MAX_PARTICLES];
-    float prev_y_positions[MAX_PARTICLES];
-    float x_positions[MAX_PARTICLES];
-    float y_positions[MAX_PARTICLES];
-    float x_velocity[MAX_PARTICLES];
-    float y_velocity[MAX_PARTICLES];
-    bool alive[MAX_PARTICLES];
-    u8 red[MAX_PARTICLES];
-    u8 green[MAX_PARTICLES];
-    u8 blue[MAX_PARTICLES];
-
-    int particle_limit;
-    int current_editing_particle;
-} ParticleSystem;
-
 /* screen */
 
 #define SCREEN_WIDTH 400
@@ -156,5 +128,14 @@ typedef struct
     u32 head;
     Image *free_images;
 } ImagePool;
+
+/*
+typedef struct
+{
+    u16 bytes;
+    char bmptext[4];
+    u8 *other stuff;
+} BMPheader;
+*/
 
 #endif

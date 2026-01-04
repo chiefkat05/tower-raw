@@ -13,6 +13,11 @@ static void Free(void *data)
     VirtualFree(data, 0, MEM_RELEASE);
 }
 
+static void openFile()
+{
+    
+}
+
 LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
 
 static int WinWidth, WinHeight, WinOffsetX, WinOffsetY;

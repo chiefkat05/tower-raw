@@ -3,14 +3,17 @@
 
 #include "global_definitions.h"
 
-static void drawPixel(int xpos, int ypos, u8 red, u8 green, u8 blue, bool looping)
+static void drawPixel(int xpos, int ypos, u8 red, u8 green, u8 blue, bool xlooping, bool ylooping)
 {
-    if (looping)
+    if (xlooping)
     {
         while (xpos >= screen_buffer.width)
         { xpos -= screen_buffer.width; }
         while (xpos < 0)
         { xpos += screen_buffer.width; }
+    }
+    if (ylooping)
+    {
         while (ypos >= screen_buffer.height)
         { ypos -= screen_buffer.height; }
         while (ypos < 0)
@@ -33,7 +36,7 @@ static void drawRect(int xpos, int ypos, int width, int height, u8 red, u8 green
     {
         for (x = 0; x < width; ++x)
         {
-            drawPixel(xpos + x, ypos + y, red, green, blue, true);
+            drawPixel(xpos + x, ypos + y, red, green, blue, false, false);
         }
     }
 }
@@ -58,7 +61,7 @@ static void spriteDraw(Sprite *spr, int xpos, int ypos)
             drawPixel(xpos + x, ypos + y,
                     spr->red[y * IMAGE_PIXEL_COUNT + x],
                     spr->green[y * IMAGE_PIXEL_COUNT + x],
-                    spr->blue[y * IMAGE_PIXEL_COUNT + x], true);
+                    spr->blue[y * IMAGE_PIXEL_COUNT + x], false, false);
         }
     }
 }
