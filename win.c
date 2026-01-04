@@ -17,7 +17,6 @@ LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
 
 static int WinWidth, WinHeight, WinOffsetX, WinOffsetY;
 static int ScreenScaleX, ScreenScaleY;
-static float WinAspect;
 static BITMAPINFO bmInfo;
 static void getWindowSize(HWND window)
 {
@@ -25,9 +24,7 @@ static void getWindowSize(HWND window)
     GetClientRect(window, &winRect);
     WinWidth = winRect.right - winRect.left;
     WinHeight = winRect.bottom - winRect.top;
-    WinAspect = WinWidth / WinHeight;
 
-    float aspectDiff = (float)WinAspect / SCREEN_ASPECT;
     /* side closest to it's screen_width cousin */
     float WidthDiff = (float)WinWidth / (float)SCREEN_WIDTH;
     float HeightDiff = (float)WinHeight / (float)SCREEN_HEIGHT;
@@ -71,9 +68,6 @@ static void clearEntireWindow(HDC context)
 }
 static void windowResize(HWND window)
 {
-    if (screen_buffer.data)
-    { VirtualFree(screen_buffer.data, 0, MEM_RELEASE); }
-
     getWindowSize(window);
 
     HDC context = GetDC(window);
@@ -132,7 +126,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
     screen_buffer.data = VirtualAlloc(0, memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     verify(screen_buffer.data != NULL, "failed to allocate screen buffer data");
 
-
     windowResize(window);
 
     ShowWindow(window, show);
@@ -152,17 +145,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
         }
 
         gameLoop();
+        
         StretchDIBits(context,
             WinOffsetX, WinOffsetY,
             ScreenScaleX, ScreenScaleY,
             0, 0, screen_buffer.width, screen_buffer.height,
             screen_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
     }
-
     gameExit();
-
-    if (screen_buffer.data)
-    { VirtualFree(screen_buffer.data, 0, MEM_RELEASE); }
 
     return 0;
 }

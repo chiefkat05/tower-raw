@@ -8,6 +8,13 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef max
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 typedef int8_t i8;
 typedef int16_t i16;
 typedef int32_t i32;
