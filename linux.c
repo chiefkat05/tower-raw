@@ -52,7 +52,7 @@ static void windowResize(xcb_connection_t *connection, xcb_screen_t *screen, xcb
     if (window_buffer)
     {
         free(window_buffer);
-        window_buffer = malloc(win_width * win_height * BYTES_PER_PIXEL);
+        window_buffer = malloc(screen_width * screen_height * BYTES_PER_PIXEL);
         verify(window_buffer, "failed to allocate window buffer");
     }
 }
@@ -127,7 +127,7 @@ int main()
 
     windowResize(connection, screen, window, WINDOW_WIDTH, WINDOW_HEIGHT);
 
-    window_buffer = malloc(win_width * win_height * BYTES_PER_PIXEL);
+    window_buffer = malloc(screen_width * screen_height * BYTES_PER_PIXEL);
     verify(window_buffer, "failed to allocate window buffer");
 
     running = true;
@@ -137,6 +137,8 @@ int main()
     /* Big thanks to user CLearner over at https://stackoverflow.com/questions/31616651/xcb-ignoring-repeated-keys */
     xcb_xkb_use_extension(connection, XCB_XKB_MAJOR_VERSION, XCB_XKB_MINOR_VERSION);
     xcb_xkb_per_client_flags(connection, XCB_XKB_ID_USE_CORE_KBD, XCB_XKB_PER_CLIENT_FLAG_DETECTABLE_AUTO_REPEAT, 1, 0, 0, 0);
+
+    xcb_pixmap_t blackpixmap = xcb_generate_id(connection);
 
     int currentWinWidth = win_width, currentWinHeight = win_height;
     int frame;
@@ -155,6 +157,11 @@ int main()
                 windowResize(connection, screen, window, reply->width, reply->height);
                 currentWinWidth = reply->width;
                 currentWinHeight = reply->height;
+
+                xcb_create_pixmap(connection, screen->root_depth, blackpixmap, window, win_width, win_height);
+                xcb_copy_area(connection, blackpixmap, window, graphics_context, 0, 0, 0, 0, win_width, win_height);
+                
+                xcb_free_pixmap(connection, blackpixmap);
             }
 
             free(reply);
@@ -175,14 +182,14 @@ int main()
         }
 
         pixelImageScale(screen_data_flipped, screen_buffer.width, screen_buffer.height,
-                        window_buffer, win_width, win_height);
+                        window_buffer, screen_width, screen_height);
         /* make a screenscaled buffer and have it go screenbuf->flipbuf->scalebuf->windowbuf */
 
-        xcb_image_t *img = xcb_image_create_native(connection, win_width, win_height,
+        xcb_image_t *img = xcb_image_create_native(connection, screen_width, screen_height,
                 XCB_IMAGE_FORMAT_Z_PIXMAP, screen->root_depth, window_buffer,
-                win_width * win_height * BYTES_PER_PIXEL, NULL);
+                screen_width * screen_height * BYTES_PER_PIXEL, NULL);
         verify(img, "failed to create native image");
-        xcb_image_put(connection, window, graphics_context, img, 0, 0, 0);
+        xcb_image_put(connection, window, graphics_context, img, screen_offset_x, screen_offset_y, 0); /* use this for winOffsetX and Y */
         
         xcb_flush(connection);
     }
