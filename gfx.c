@@ -3,76 +3,63 @@
 
 #include "global_definitions.h"
 
-static void drawPixel(int xpos, int ypos, u8 red, u8 green, u8 blue, bool xlooping, bool ylooping)
+static void drawPixel(PixelBuffer *buffer, int xpos, int ypos, u8 red, u8 green, u8 blue, bool xlooping, bool ylooping)
 {
+    xpos -= buffer->camera_x_position;
+    ypos -= buffer->camera_y_position;
+
     if (xlooping)
     {
-        while (xpos >= screen_buffer.width)
-        { xpos -= screen_buffer.width; }
+        while (xpos >= buffer->width)
+        { xpos -= buffer->width; }
         while (xpos < 0)
-        { xpos += screen_buffer.width; }
+        { xpos += buffer->width; }
     }
     if (ylooping)
     {
-        while (ypos >= screen_buffer.height)
-        { ypos -= screen_buffer.height; }
+        while (ypos >= buffer->height)
+        { ypos -= buffer->height; }
         while (ypos < 0)
-        { ypos += screen_buffer.height; }
+        { ypos += buffer->height; }
     }
 
-    if (xpos >= screen_buffer.width || xpos < 0 || ypos >= screen_buffer.height || ypos < 0)
+    if (xpos >= buffer->width || xpos < 0 || ypos >= buffer->height || ypos < 0)
     { return; }
 
-    int pitch = screen_buffer.width;
-    u32 *pixel = (u32 *)screen_buffer.data + (ypos * pitch) + xpos;
+    int pitch = buffer->width;
+    u32 *pixel = (u32 *)buffer->data + (ypos * pitch) + xpos;
 
     *pixel = 255 << 24 | red << 16 | green << 8 | blue;
 }
-static void drawRect(int xpos, int ypos, int width, int height, u8 red, u8 green, u8 blue)
+static void drawRect(PixelBuffer *buffer, int xpos, int ypos, int width, int height, u32 color)
 {
     int x, y;
-    int pitch = screen_buffer.width * screen_buffer.bytes_per_pixel;
     for (y = 0; y < height; ++y)
     {
         for (x = 0; x < width; ++x)
         {
-            drawPixel(xpos + x, ypos + y, red, green, blue, false, false);
+            u8 red = (color >> 16) & 255;
+            u8 green = (color >> 8) & 255;
+            u8 blue = (color >> 0) & 255;
+            drawPixel(buffer, xpos + x, ypos + y, red, green, blue, false, false);
         }
     }
 }
 
-static void spriteFillRandom(Sprite *spr)
+static void imageDraw(PixelBuffer *buffer, Image *img, int xpos, int ypos)
 {
-    int i;
-    for (i = 0; i < IMAGE_PIXEL_COUNT; ++i)
+    u32 x, y;
+    for (y = 0; y < IMAGE_SECTOR_SIDE_PIXEL_COUNT * img->sector_y_count; ++y)
     {
-        spr->red[i] = random(0, 255);
-        spr->green[i] = random(0, 255);
-        spr->blue[i] = random(0, 255);
-    }
-}
-static void spriteDraw(Sprite *spr, int xpos, int ypos)
-{
-    int x, y;
-    for (y = 0; y < IMAGE_PIXEL_COUNT; ++y)
-    {
-        for (x = 0; x < IMAGE_PIXEL_COUNT; ++x)
+        for (x = 0; x < IMAGE_SECTOR_SIDE_PIXEL_COUNT * img->sector_x_count; ++x)
         {
-            drawPixel(xpos + x, ypos + y,
-                    spr->red[y * IMAGE_PIXEL_COUNT + x],
-                    spr->green[y * IMAGE_PIXEL_COUNT + x],
-                    spr->blue[y * IMAGE_PIXEL_COUNT + x], false, false);
-        }
-    }
-}
-static void imageDraw(Image *img, int xpos, int ypos)
-{
-    int x, y;
-    for (y = 0; y < img->sheetHeight; ++y)
-    {
-        for (x = 0; x < img->sheetWidth; ++x)
-        {
-            spriteDraw(&img->spriteSheet[y * img->sheetWidth + x], xpos + (x * IMAGE_PIXEL_COUNT), ypos + (y * IMAGE_PIXEL_COUNT));
+            u32 color = img->pixel_data[y * (IMAGE_SECTOR_SIDE_PIXEL_COUNT * img->sector_x_count) + x];
+            u8 red = (color >> 16) & 255;
+            u8 green = (color >> 8) & 255;
+            u8 blue = (color >> 0) & 255;
+            /*u8 alpha = (color >> 24) & 255;*/
+            drawPixel(buffer, xpos + x, ypos + y,
+                    red, green, blue, false, false);
         }
     }
 }
@@ -92,5 +79,41 @@ static void clearScreen(PixelBuffer *screen)
         row += pitch;
     }
 }
+
+void pixelDataScale(void *src, int srcw, int srch, void *dest, int destw, int desth)
+{
+    float scaleX = (float)destw / (float)srcw;
+    float scaleY = (float)desth / (float)srch;
+    int x, y;
+    u32 *pixel = (u32 *)dest;
+    u32 *srcpixel = (u32 *)src;
+
+    int minw = MIN(srcw, destw);
+    int minh = MIN(srch, desth);
+    int maxw = MAX(srcw, destw);
+    int maxh = MAX(srch, desth);
+
+    int currentX = 0;
+    int currentY = 0;
+
+    for (y = 0; y < desth; ++y)
+    {
+        for (x = 0; x < destw; ++x)
+        {
+            int pX = (int)((float)x / scaleX);
+            int pY = (int)((float)y / scaleY);
+            int diffX = pX - currentX;
+            int diffY = pY - currentY;
+
+            srcpixel += diffX;
+            currentX = pX;
+            srcpixel += diffY * srcw;
+            currentY = pY;
+
+            *pixel++ = *srcpixel;
+        }
+    }
+}
+
 
 #endif

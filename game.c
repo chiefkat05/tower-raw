@@ -6,18 +6,13 @@
 #include "gfx.c"
 #include "particles.c"
 #include "input.c"
-#include "audio.c"
-
-static void *Allocate(u32 bytes);
-static void Free(void *data);
-
-static void readFile(cstr path, void *out, u64 size);
-static void writeFile(cstr path, void *in, u64 size);
 
 #define SPAWNX 10.0f
 #define SPAWNY 60.0f
 typedef struct
 {
+    float accumulatedTime;
+
     float playerx, playery, prevplayerx, prevplayery, playerfallspeed;
     bool playerjumped;
     ParticleSystem snow;
@@ -26,127 +21,130 @@ typedef struct
     SoundStream music;
     Sound step;
 
-    Sprite plSprite[12];
     Image plImg;
+
+    bool initiated;
 } GameScene;
-static GameScene game;
 
-static void gameInit()
+static void gameInit(GameMemory *game_mem)
 {
-    game = (GameScene){};
+    GameScene *scene = (GameScene *)game_mem->data;
+    verify(game_mem->size >= sizeof(GameScene), "not enough game data allocated");
 
-    game.playerx = SPAWNX;
-    game.playery = SPAWNY;
-    particleSystemInit(&game.snow, PARTICLE_SNOW);
-    particleSystemInit(&game.playerdust, PARTICLE_DUST);
+    scene->playerx = SPAWNX;
+    scene->playery = SPAWNY;
+    particleSystemInit(&scene->snow, PARTICLE_SNOW);
+    particleSystemInit(&scene->playerdust, PARTICLE_DUST);
 
-    audioInit();
-    audioStreamInit(&game.music, 128);
-    audioPlayStream(&game.music);
-    audioSoundInit(&game.step, 512, 256);
+    scene->plImg.sector_x_count = IMAGE_SIDE_SECTOR_COUNT;
+    scene->plImg.sector_y_count = IMAGE_SIDE_SECTOR_COUNT;
 
-    int i;
-    for (i = 0; i < 6; ++i)
-    { spriteFillRandom(&game.plSprite[i]); }
+    game_mem->readFile("img/img.bmp", scene->plImg.pixel_data, IMAGE_PIXEL_COUNT);
     
-    game.plImg.spriteSheet = &game.plSprite[0];
-    game.plImg.sheetWidth = 2;
-    game.plImg.sheetHeight = 3;
+    scene->initiated = true;
 }
 
-static float accumulatedTime;
-static void gameLoop()
+void gameLoop(GameMemory *game_mem)
 {
-    accumulatedTime += getDeltaTime();
-
-    audioStreamUpdateBuffers(&game.music, 128);
-
-    const float speed = 160.0f * TICK_SPEED;
-    float tspeed = 0.0f;
-    const float gravity = 320.0f * TICK_SPEED;
-    if (inputJustPressed(KEY_X))
-    { audioPlay(&game.step); }
-
-    while (accumulatedTime >= TICK_SPEED)
+    GameScene *scene = (GameScene *)game_mem->data;
+    if (!scene->initiated)
     {
-        game.prevplayerx = game.playerx;
-        game.prevplayery = game.playery;
+        gameInit(game_mem);
+    }
+    /*
+        on gameExit():
+            alcCloseDevice(aDevice);
+            verify(alGetError() == AL_NO_ERROR, "alcCloseDevice failed");
+    */
 
-        if (game.playery < 0)
+    scene->accumulatedTime += game_mem->getDeltaTime();
+
+    const float speed = 160.0f;
+    float tspeed = 0.0f;
+    const float gravity = 320.0f;
+
+    while (scene->accumulatedTime >= TICK_SPEED)
+    {
+        scene->prevplayerx = scene->playerx;
+        scene->prevplayery = scene->playery;
+
+        if (scene->playery > 60.0)
         {
-            game.playerx = SPAWNX;
-            game.playery = SPAWNY;
-        }
-        if (game.playery > 60.0)
-        {
-            game.playerjumped = true;
-            game.playerfallspeed -= gravity * TICK_SPEED / 2;
+            scene->playerjumped = true;
+            scene->playerfallspeed -= gravity * TICK_SPEED / 2;
         } else
         {
-            if (game.playerjumped)
+            if (scene->playerjumped)
             {
-                audioPlay(&game.step);
-                particleSystemGenerate(&game.playerdust, 15, 15, game.playerx, game.playerx + 20, game.playery, game.playery);
+                particleSystemGenerate(&scene->playerdust, 15, 15, scene->playerx, scene->playerx + 20, scene->playery, scene->playery);
             }
-            game.playery = 60.0;
-            game.playerjumped = false;
-            game.playerfallspeed = 0.0f;
+            scene->playery = 60.0;
+            scene->playerjumped = false;
+            scene->playerfallspeed = 0.0f;
         }
-        if (inputGet(KEY_W) && !game.playerjumped)
+        if (inputGet(game_mem->InputValues, KEY_W) && !scene->playerjumped)
         {
-            audioPlay(&game.step);
-            game.playerfallspeed = 200.0f * TICK_SPEED;
-            game.playerjumped = true;
+            scene->playerfallspeed = speed;
+            scene->playerjumped = true;
         }
-        if (inputGet(KEY_A))
+        if (inputGet(game_mem->InputValues, KEY_A))
         {
             tspeed = -speed;
         }
-        if (inputGet(KEY_D))
+        if (inputGet(game_mem->InputValues, KEY_D))
         {
             tspeed = speed;
         }
-
-        game.playery += game.playerfallspeed;
-        game.playerx += tspeed;
-        if (game.playery > 60.0)
+        
+        scene->playerx += tspeed * TICK_SPEED;
+        scene->playery += scene->playerfallspeed * TICK_SPEED;
+        if (scene->playery > 60.0)
         {
-            game.playerfallspeed -= gravity * TICK_SPEED / 2;
+            scene->playerfallspeed -= gravity * TICK_SPEED / 2;
         }
-
+        /*
         static float timer = 0.0f;
         timer -= 5000.0f * TICK_SPEED;
         if (timer <= 0.0f)
         {
             timer = 1.0f;
-            particleSystemGenerate(&game.snow, 1, MAX_PARTICLES, 0, screen_buffer.width, screen_buffer.height - 1, screen_buffer.height - 1);
+            particleSystemGenerate(&scene->snow, 1, MAX_PARTICLES, camera_x_position, camera_x_position + game_mem->screen_buffer.width,
+                camera_y_position + game_mem->screen_buffer.height - 1, camera_y_position + game_mem->screen_buffer.height - 1);
         }
-        particleSystemUpdate(&game.snow);
-        particleSystemUpdate(&game.playerdust);
+        particleSystemUpdate(&scene->snow, &game_mem->screen_buffer);
+        */
+        particleSystemUpdate(&scene->playerdust, &game_mem->screen_buffer);
 
-        accumulatedTime -= TICK_SPEED;
+        scene->accumulatedTime -= TICK_SPEED;
     }
-    clearScreen(&screen_buffer);
+    clearScreen(&game_mem->screen_buffer);
+    /*
+    camera_x_position = -scene->playerx + game_mem->screen_buffer.width / 2;
+    camera_y_position = -scene->playery + game_mem->screen_buffer.height / 2;
+    */
+   if (scene->playerx < game_mem->screen_buffer.camera_x_position + game_mem->screen_buffer.width / (float)(5.0f/1.5f))
+   {
+    game_mem->screen_buffer.camera_x_position = scene->playerx - game_mem->screen_buffer.width / (float)(5.0f/1.5f);
+   }
+   if (scene->playerx > game_mem->screen_buffer.camera_x_position + game_mem->screen_buffer.width / (float)(5.0f/3.0f))
+   {
+    game_mem->screen_buffer.camera_x_position = scene->playerx - game_mem->screen_buffer.width / (float)(5.0f/3.0f);
+   }
 
     /* player (please fix the pxAlpha and pyAlpha to be not wiggly) */
-    float pxAlpha = lerp(game.prevplayerx, game.playerx, accumulatedTime);
-    float pyAlpha = lerp(game.prevplayery, game.playery, accumulatedTime);
-    imageDraw(&game.plImg, game.playerx, game.playery);
-    particleSystemDraw(&game.playerdust, accumulatedTime);
+    /*float pxAlpha = lerp(scene->prevplayerx, scene->playerx, scene->accumulatedTime);
+    float pyAlpha = lerp(scene->prevplayery, scene->playery, scene->accumulatedTime);*/
 
+    imageDraw(&game_mem->screen_buffer, &scene->plImg, scene->playerx, scene->playery);
+    particleSystemDraw(&scene->playerdust, &game_mem->screen_buffer, scene->accumulatedTime);
 
     /* floor */
-    drawRect(0, 20, SCREEN_WIDTH, 40, 140, 140, 50);
+    drawRect(&game_mem->screen_buffer, 0, 20, SCREEN_WIDTH, 40, 140 << 16 | 140 << 8 | 50);
 
     /* snow */
-    particleSystemDraw(&game.snow, accumulatedTime);
+    particleSystemDraw(&scene->snow, &game_mem->screen_buffer, scene->accumulatedTime);
 
-    inputUpdate();
-}
-
-void gameExit()
-{
-    audioExit();
+    inputUpdate(game_mem->InputValues, game_mem->PrevInputValues);
 }
 
 #endif

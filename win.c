@@ -1,21 +1,85 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include "global_definitions.h"
 
-#include "game.c"
-
-static void *Allocate(u32 bytes)
+#define GAME_LOOP(name) void name(GameMemory *game_mem)
+typedef GAME_LOOP(gameLoop);
+GAME_LOOP(gameLoopStub)
 {
-    return VirtualAlloc(0, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
-static void Free(void *data)
+#define INPUT_SET(name) void name(i32 *inputArray, InputCode input, i32 value)
+typedef INPUT_SET(inputSet);
+INPUT_SET(inputSetStub)
 {
-    VirtualFree(data, 0, MEM_RELEASE);
 }
 
-static void openFile()
+READ_FILE(readFile)
 {
+    HANDLE file = CreateFile(path, GENERIC_READ, FILE_SHARE_READ,
+                    NULL, OPEN_EXISTING, 0, 0);
+    verify(file, "failed to open file");
+
+    ReadFile(file, out, size, NULL, NULL);
+
+    CloseHandle(file);
+}
+WRITE_FILE(writeFile)
+{
+
+}
+static LARGE_INTEGER currentTime, prevTime, freqTime;
+GET_DELTATIME(getDeltaTime)
+{
+    prevTime = currentTime;
+    QueryPerformanceCounter(&currentTime);
+    unsigned long deltaCycles = currentTime.QuadPart - prevTime.QuadPart;
+
+    return (float)(deltaCycles) / (float)freqTime.QuadPart;
+}
+
+typedef struct
+{
+    HMODULE gameLib;
+    gameLoop *gameLoop;
+    inputSet *inputSet;
+    bool isValid;
+} gameFunctions;
+static gameFunctions gameFunc;
+
+static void loadGameCode()
+{
+    if (gameFunc.gameLib)
+    { return; }
     
+    gameFunc.isValid = false;
+
+    CopyFile("game.dll", "game_temp.dll", FALSE);
+    gameFunc.gameLib = LoadLibraryA("game_temp.dll");
+    if (gameFunc.gameLib)
+    {
+        gameFunc.gameLoop = (gameLoop *)GetProcAddress(gameFunc.gameLib, "gameLoop");
+        gameFunc.inputSet = (inputSet *)GetProcAddress(gameFunc.gameLib, "inputSet");
+        gameFunc.isValid = (gameFunc.gameLoop && gameFunc.inputSet);
+    }
+    
+    if (!gameFunc.isValid)
+    {
+        printf("game functions not valid\n");
+        gameFunc.gameLoop = gameLoopStub;
+        gameFunc.inputSet = inputSetStub;
+    }
+}
+static void unloadGameCode()
+{
+    if (gameFunc.gameLib)
+    {
+        FreeLibrary(gameFunc.gameLib);
+        gameFunc.gameLib = NULL;
+    }
+    gameFunc.isValid = false;
+    gameFunc.gameLoop = gameLoopStub;
+    gameFunc.inputSet = inputSetStub;
 }
 
 LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -33,8 +97,8 @@ static void getWindowSize(HWND window)
     /* side closest to it's screen_width cousin */
     float WidthDiff = (float)WinWidth / (float)SCREEN_WIDTH;
     float HeightDiff = (float)WinHeight / (float)SCREEN_HEIGHT;
-    float widthAspect = WidthDiff / min(WidthDiff, HeightDiff);
-    float heightAspect = HeightDiff / min(WidthDiff, HeightDiff);
+    float widthAspect = WidthDiff / MIN(WidthDiff, HeightDiff);
+    float heightAspect = HeightDiff / MIN(WidthDiff, HeightDiff);
 
     ScreenScaleX = (float)WinWidth / widthAspect;
     ScreenScaleY = (float)WinHeight / heightAspect;
@@ -79,16 +143,7 @@ static void windowResize(HWND window)
     clearEntireWindow(context);
 }
 
-static LARGE_INTEGER currentTime, prevTime, freqTime;
-static float getDeltaTime()
-{
-    prevTime = currentTime;
-    QueryPerformanceCounter(&currentTime);
-    unsigned long deltaCycles = currentTime.QuadPart - prevTime.QuadPart;
-
-    return (float)(deltaCycles) / (float)freqTime.QuadPart;
-}
-
+static bool running;
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
 {
     WNDCLASS class = {
@@ -102,14 +157,24 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
 
     HWND window = CreateWindowExA(
             0, class.lpszClassName, "Tower", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            CW_USEDEFAULT, CW_USEDEFAULT, 1280, 720,
             0, 0, inst, 0);
 
     verify(window != NULL, "failed to create window");
 
     HDC context = GetDC(window);
+
+    loadGameCode();
+
+    GameMemory game_memory = {};
+    game_memory.size = GAME_MEMORY_SIZE;
+    game_memory.data = VirtualAlloc(0, game_memory.size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    verify(game_memory.data, "failed to allocate game data");
+    game_memory.readFile = readFile;
+    game_memory.writeFile = writeFile;
+    game_memory.getDeltaTime = getDeltaTime;
     
-    screen_buffer = (PixelBuffer){
+    game_memory.screen_buffer = (PixelBuffer){
             .width = SCREEN_WIDTH,
             .height = SCREEN_HEIGHT,
             .bytes_per_pixel = 4,
@@ -117,47 +182,141 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
 
     BITMAPINFOHEADER bmHeader = {
         .biSize = sizeof(bmHeader),
-        .biWidth = screen_buffer.width,
-        .biHeight = screen_buffer.height,
+        .biWidth = game_memory.screen_buffer.width,
+        .biHeight = game_memory.screen_buffer.height,
         .biPlanes = 1,
-        .biBitCount = 8 * screen_buffer.bytes_per_pixel,
+        .biBitCount = 8 * game_memory.screen_buffer.bytes_per_pixel,
         .biCompression = BI_RGB
     };
     bmInfo = (BITMAPINFO){
         .bmiHeader = bmHeader
     };
 
-    int memory_size = screen_buffer.width * screen_buffer.height * screen_buffer.bytes_per_pixel;
-    screen_buffer.data = VirtualAlloc(0, memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    verify(screen_buffer.data != NULL, "failed to allocate screen buffer data");
+    int memory_size = game_memory.screen_buffer.width * game_memory.screen_buffer.height * game_memory.screen_buffer.bytes_per_pixel;
+    game_memory.screen_buffer.data = VirtualAlloc(0, memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    verify(game_memory.screen_buffer.data != NULL, "failed to allocate screen buffer data");
 
     windowResize(window);
 
     ShowWindow(window, show);
-    running = true;
 
-    gameInit();
+    running = true;
     QueryPerformanceFrequency(&freqTime);
     getDeltaTime();
 
+    int frame = 600;
     while (running)
     {
+        if (frame-- <= 0)
+        {
+            unloadGameCode();
+            loadGameCode();
+            frame = 600;
+        }
         MSG msg = {};
         while (PeekMessageA(&msg, window, 0, 0, PM_REMOVE) > 0)
         {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
+
+            if (msg.message == WM_KEYDOWN || msg.message == WM_KEYUP)
+            {
+                switch(msg.wParam)
+                {
+                    case 'A':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_A, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'B':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_B, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'C':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_C, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'D':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_D, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'E':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_E, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'F':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_F, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'G':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_G, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'H':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_H, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'I':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_I, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'J':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_J, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'K':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_K, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'L':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_L, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'M':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_M, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'N':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_N, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'O':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_O, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'P':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_P, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'Q':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_Q, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'R':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_R, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'S':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_S, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'T':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_T, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'U':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_U, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'V':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_V, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'W':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_W, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'X':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_X, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'Y':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_Y, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case 'Z':
+                        gameFunc.inputSet(game_memory.InputValues, KEY_Z, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    default:
+                        break;
+                }
+            }
         }
 
-        gameLoop();
-        
+        gameFunc.gameLoop(&game_memory);
+
         StretchDIBits(context,
             WinOffsetX, WinOffsetY,
             ScreenScaleX, ScreenScaleY,
-            0, 0, screen_buffer.width, screen_buffer.height,
-            screen_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
+            0, 0, game_memory.screen_buffer.width, game_memory.screen_buffer.height,
+            game_memory.screen_buffer.data, &bmInfo, DIB_RGB_COLORS, SRCCOPY);
     }
-    gameExit();
+
+    VirtualFree(game_memory.data, 0, MEM_RELEASE);
 
     return 0;
 }
@@ -173,93 +332,6 @@ LRESULT CALLBACK WinProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
     if (msg == WM_SIZE)
     {
         windowResize(window);
-        return 0;
-    }
-    if (msg == WM_KEYDOWN || msg == WM_KEYUP)
-    {
-        switch(wparam)
-        {
-            case 'A':
-                inputSet(KEY_A, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'B':
-                inputSet(KEY_B, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'C':
-                inputSet(KEY_C, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'D':
-                inputSet(KEY_D, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'E':
-                inputSet(KEY_E, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'F':
-                inputSet(KEY_F, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'G':
-                inputSet(KEY_G, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'H':
-                inputSet(KEY_H, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'I':
-                inputSet(KEY_I, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'J':
-                inputSet(KEY_J, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'K':
-                inputSet(KEY_K, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'L':
-                inputSet(KEY_L, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'M':
-                inputSet(KEY_M, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'N':
-                inputSet(KEY_N, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'O':
-                inputSet(KEY_O, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'P':
-                inputSet(KEY_P, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'Q':
-                inputSet(KEY_Q, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'R':
-                inputSet(KEY_R, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'S':
-                inputSet(KEY_S, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'T':
-                inputSet(KEY_T, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'U':
-                inputSet(KEY_U, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'V':
-                inputSet(KEY_V, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'W':
-                inputSet(KEY_W, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'X':
-                inputSet(KEY_X, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'Y':
-                inputSet(KEY_Y, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            case 'Z':
-                inputSet(KEY_Z, msg == WM_KEYDOWN ? PRESSED : RELEASED);
-                break;
-            default:
-                break;
-        }
         return 0;
     }
     return DefWindowProc(window, msg, wparam, lparam);

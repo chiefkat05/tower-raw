@@ -2,7 +2,7 @@
 #define AUDIO_C
 
 #include "global_definitions.h"
-void verifyAL()
+static void verifyAL()
 {
     ALenum err = alGetError();
     
@@ -121,11 +121,6 @@ static void audioPlay(Sound *snd)
 {
     alSourcePlay(snd->source);
     verify(alGetError() == AL_NO_ERROR, "alSourcePlay failed");
-}
-static void audioExit()
-{
-    alcCloseDevice(aDevice);
-    verify(alGetError() == AL_NO_ERROR, "alcCloseDevice failed");
 }
 
 #endif

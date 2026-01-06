@@ -3,15 +3,13 @@
 
 #include "global_definitions.h"
 
-/* particles */
-
 typedef enum
 {
     PARTICLE_SNOW,
     PARTICLE_DUST
 } ParticleStyle;
 
-#define MAX_PARTICLES 9000
+#define MAX_PARTICLES 1024
 typedef struct
 {
     ParticleStyle style;
@@ -26,19 +24,16 @@ typedef struct
     float x_velocitypush[MAX_PARTICLES];
     float y_velocitypush[MAX_PARTICLES];
 
-    bool x_loop;
-    bool y_loop;
-
     bool alive[MAX_PARTICLES];
-    float red[MAX_PARTICLES];
-    float green[MAX_PARTICLES];
-    float blue[MAX_PARTICLES];
-    float red_velocity[MAX_PARTICLES];
-    float green_velocity[MAX_PARTICLES];
-    float blue_velocity[MAX_PARTICLES];
+    u8 red[MAX_PARTICLES];
+    u8 green[MAX_PARTICLES];
+    u8 blue[MAX_PARTICLES];
 
     float life_time[MAX_PARTICLES];
     bool life_limited[MAX_PARTICLES];
+
+    bool x_loop;
+    bool y_loop;
 
     int particle_limit;
     int current_editing_particle;
@@ -92,12 +87,6 @@ static void particleSystemMove(ParticleSystem *system, float xvel, float yvel)
     system->x_velocity[system->current_editing_particle] = xvel;
     system->y_velocity[system->current_editing_particle] = yvel;
 }
-static void particleSystemColorMove(ParticleSystem *system, float redvel, float greenvel, float bluevel)
-{
-    system->red_velocity[system->current_editing_particle] = redvel;
-    system->green_velocity[system->current_editing_particle] = greenvel;
-    system->blue_velocity[system->current_editing_particle] = bluevel;
-}
 static void particleSystemLifespan(ParticleSystem *system, float time)
 {
     system->life_limited[system->current_editing_particle] = true;
@@ -131,9 +120,9 @@ static void particleSystemGenerate(ParticleSystem *system, int particles, int li
                 } break;
             case PARTICLE_DUST:
                 {
-                int shade = random(100, 150);
+                int shade = random(200, 250);
                 particleSystemColor(system, shade, shade, shade);
-                particleSystemMove(system, (float)(random(-80, 80)), (float)(random(60, 120)));
+                particleSystemMove(system, (float)(random(-160, 160)), (float)(random(120, 180)));
                 particleSystemLifespan(system, ((float)random(200, 300)) / 1000.0f);
                 } break;
             default:
@@ -141,7 +130,7 @@ static void particleSystemGenerate(ParticleSystem *system, int particles, int li
         }
     }
 }
-static void particleSystemUpdate(ParticleSystem *system)
+static void particleSystemUpdate(ParticleSystem *system, PixelBuffer *buffer)
 {
     int p;
     for (p = 0; p < MAX_PARTICLES; ++p)
@@ -160,10 +149,6 @@ static void particleSystemUpdate(ParticleSystem *system)
         system->x_velocity[p] += system->x_velocitypush[p] * TICK_SPEED / 2;
         system->y_velocity[p] += system->y_velocitypush[p] * TICK_SPEED / 2;
 
-        system->red[p] -= system->red_velocity[p] * TICK_SPEED;
-        system->green[p] -= system->green_velocity[p] * TICK_SPEED;
-        system->blue[p] -= system->blue_velocity[p] * TICK_SPEED;
-
         if (system->life_limited[p])
         {
             system->life_time[p] -= TICK_SPEED;
@@ -178,7 +163,7 @@ static void particleSystemUpdate(ParticleSystem *system)
         switch(system->style)
         {
             case PARTICLE_SNOW:
-                if (system->y_positions[p] < 0)
+                if (system->y_positions[p] < buffer->camera_y_position - buffer->height / 2 - 40)
                 {
                     system->alive[p] = false;
                 }
@@ -192,7 +177,7 @@ static void particleSystemUpdate(ParticleSystem *system)
     }
 
 }
-static void particleSystemDraw(ParticleSystem *system, float accumulatedTime)
+static void particleSystemDraw(ParticleSystem *system, PixelBuffer *buffer, float accumulatedTime)
 {
     int p;
     for (p = 0; p < MAX_PARTICLES; ++p)
@@ -202,7 +187,7 @@ static void particleSystemDraw(ParticleSystem *system, float accumulatedTime)
         float xAlpha = lerp(system->prev_x_positions[p], system->x_positions[p], accumulatedTime);
         float yAlpha = lerp(system->prev_y_positions[p], system->y_positions[p], accumulatedTime);
 
-        drawPixel(xAlpha, yAlpha,
+        drawPixel(buffer, xAlpha, yAlpha,
                 system->red[p], system->green[p], system->blue[p], system->x_loop, system->y_loop);
     }
 }

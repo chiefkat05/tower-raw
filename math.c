@@ -2,6 +2,7 @@
 #define MATH_C
 
 #include "global_definitions.h"
+#include <stdlib.h>
 
 #define random(min, height) (rand() % ((height) - (min)) + min)
 #define PI 3.1415926535f

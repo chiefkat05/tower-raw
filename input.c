@@ -3,33 +3,33 @@
 
 #include "global_definitions.h"
 
-static void inputSet(InputCode input, i32 value)
+void inputSet(i32 *inputArray, InputCode input, i32 value)
 {
-    InputValues[input] = value;
+    inputArray[input] = value;
 }
-static void inputUpdate()
+static void inputUpdate(i32 *inputArray, i32 *prevInputArray)
 {
     int i;
     for (i = 0; i < total_key_count; ++i)
     {
-        PrevInputValues[i] = InputValues[i];
+        prevInputArray[i] = inputArray[i];
     }
 }
-i32 inputGet(InputCode input)
+i32 inputGet(i32 *inputArray, InputCode input)
 {
-    return InputValues[input];
+    return inputArray[input];
 }
-bool inputJustReleased(InputCode input)
+bool inputJustReleased(i32 *inputArray, i32 *prevInputArray, InputCode input)
 {
-    if (InputValues[input] != PrevInputValues[input] && InputValues[input] == RELEASED)
+    if (inputArray[input] != prevInputArray[input] && inputArray[input] == RELEASED)
     {
         return true;
     }
     return false;
 }
-bool inputJustPressed(InputCode input)
+bool inputJustPressed(i32 *inputArray, i32 *prevInputArray, InputCode input)
 {
-    if (InputValues[input] != PrevInputValues[input] && InputValues[input] == PRESSED)
+    if (inputArray[input] != prevInputArray[input] && inputArray[input] == PRESSED)
     {
         return true;
     }

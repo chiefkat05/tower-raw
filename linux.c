@@ -3,27 +3,35 @@
 #include <xcb/xcb.h>
 #include <xcb/xkb.h>
 #include <xcb/xcb_image.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <time.h>
 #include <fcntl.h>
+#include <linux/time.h>
 
-#include "game.c"
+#include "global_definitions.h"
 
-static void *Allocate(u32 bytes)
+void readFile(cstr path, void *out, u64 size)
 {
-    return malloc(bytes);
+    FILE *file = fopen(path, "rb");
+    verify(file, "failed to open file");
+
+    fread(out, size, 1, file);
+
+    fclose(file);
 }
-static void Free(void *data)
+void writeFile(cstr path, void *in, u64 size)
 {
-    free(data);
+
 }
 
 static struct timespec currentTime, prevTime;
-static float getDeltaTime()
+float getDeltaTime()
 {
     prevTime = currentTime;
-    clock_gettime(0, &currentTime);
-    
+    clock_gettime(CLOCK_MONOTONIC, &currentTime);
+
     float time_passed = (currentTime.tv_sec - prevTime.tv_sec) * 1000000000 + (currentTime.tv_nsec - prevTime.tv_nsec);
     float delta = time_passed / 1000000000.0f;
 
@@ -41,8 +49,8 @@ static void windowResize(xcb_connection_t *connection, xcb_screen_t *screen, xcb
     /* side closest to it's screen_width cousin */
     float WidthDiff = (float)width / (float)SCREEN_WIDTH;
     float HeightDiff = (float)height / (float)SCREEN_HEIGHT;
-    float widthAspect = WidthDiff / min(WidthDiff, HeightDiff);
-    float heightAspect = HeightDiff / min(WidthDiff, HeightDiff);
+    float widthAspect = WidthDiff / MIN(WidthDiff, HeightDiff);
+    float heightAspect = HeightDiff / MIN(WidthDiff, HeightDiff);
 
     screen_width = (float)width / widthAspect;
     screen_height = (float)height / heightAspect;
@@ -57,41 +65,6 @@ static void windowResize(xcb_connection_t *connection, xcb_screen_t *screen, xcb
     }
 }
 static void xcbEventLoop(xcb_connection_t *connection, xcb_screen_t *screen, xcb_window_t window);
-
-void pixelImageScale(void *src, int srcw, int srch, void *dest, int destw, int desth)
-{
-    float scaleX = (float)destw / (float)srcw;
-    float scaleY = (float)desth / (float)srch;
-    int x, y;
-    u32 *pixel = (u32 *)dest;
-    u32 *srcpixel = (u32 *)src;
-
-    int minw = min(srcw, destw);
-    int minh = min(srch, desth);
-    int maxw = max(srcw, destw);
-    int maxh = max(srch, desth);
-
-    int currentX = 0;
-    int currentY = 0;
-
-    for (y = 0; y < desth; ++y)
-    {
-        for (x = 0; x < destw; ++x)
-        {
-            int pX = (int)((float)x / scaleX);
-            int pY = (int)((float)y / scaleY);
-            int diffX = pX - currentX;
-            int diffY = pY - currentY;
-
-            srcpixel += diffX;
-            currentX = pX;
-            srcpixel += diffY * srcw;
-            currentY = pY;
-
-            *pixel++ = *srcpixel;
-        }
-    }
-}
 
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
@@ -130,8 +103,12 @@ int main()
     window_buffer = malloc(screen_width * screen_height * BYTES_PER_PIXEL);
     verify(window_buffer, "failed to allocate window buffer");
 
+    GameMemory game_memory;
+    game_memory.size = GAME_MEMORY_SIZE;
+    game_memory.data = malloc(game_memory.size);
+    verify(game_memory.data, "failed to allocate game data");
+
     running = true;
-    gameInit();
     getDeltaTime();
 
     /* Big thanks to user CLearner over at https://stackoverflow.com/questions/31616651/xcb-ignoring-repeated-keys */
@@ -167,7 +144,7 @@ int main()
             free(reply);
         }
 
-        gameLoop();
+        gameLoop(&game_memory);
 
         /* vertically flip image (this could use optimization) */
         int y = 0, x = 0;
@@ -181,7 +158,7 @@ int main()
             }
         }
 
-        pixelImageScale(screen_data_flipped, screen_buffer.width, screen_buffer.height,
+        pixelDataScale(screen_data_flipped, screen_buffer.width, screen_buffer.height,
                         window_buffer, screen_width, screen_height);
         /* make a screenscaled buffer and have it go screenbuf->flipbuf->scalebuf->windowbuf */
 
@@ -193,9 +170,12 @@ int main()
         
         xcb_flush(connection);
     }
+    free(game_memory.data);
 
     xcb_free_gc(connection, graphics_context);
     xcb_disconnect(connection);
+
+    return 0;
 }
 
 static void xcbEventLoop(xcb_connection_t *connection, xcb_screen_t *screen, xcb_window_t window)
