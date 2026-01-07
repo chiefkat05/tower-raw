@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include <windows.h>
+
 #include "global_definitions.h"
 
 #define GAME_LOOP(name) void name(GameMemory *game_mem)
@@ -63,12 +64,12 @@ static void loadGameCode()
         gameFunc.isValid = (gameFunc.gameLoop && gameFunc.inputSet);
     }
     
-    if (!gameFunc.isValid)
-    {
-        printf("game functions not valid\n");
-        gameFunc.gameLoop = gameLoopStub;
-        gameFunc.inputSet = inputSetStub;
-    }
+    if (gameFunc.isValid)
+    { return; }
+
+    printf("game functions not valid\n");
+    gameFunc.gameLoop = gameLoopStub;
+    gameFunc.inputSet = inputSetStub;
 }
 static void unloadGameCode()
 {
@@ -204,14 +205,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
     QueryPerformanceFrequency(&freqTime);
     getDeltaTime();
 
-    int frame = 600;
+    int frame = 200;
     while (running)
     {
         if (frame-- <= 0)
         {
             unloadGameCode();
             loadGameCode();
-            frame = 600;
+            frame = 200;
         }
         MSG msg = {};
         while (PeekMessageA(&msg, window, 0, 0, PM_REMOVE) > 0)
