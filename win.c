@@ -1,6 +1,8 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include <dsound.h>
+#include <xinput.h>
 
 #include "global_definitions.h"
 
@@ -144,6 +146,74 @@ static void windowResize(HWND window)
     clearEntireWindow(context);
 }
 
+#define verifyDS() verifyDirectSound(err, __FILE__, __LINE__)
+void verifyDirectSound(HRESULT err, cstr file, int line)
+{
+    verifyOrCrash(err == DS_OK, "DirectSound failure", file, line);
+}
+static LPDIRECTSOUND audioInit()
+{
+    LPDIRECTSOUND dsound;
+    HRESULT err = DirectSoundCreate(NULL, &dsound, NULL);
+    verifyDS();
+
+    return dsound;
+}
+static LPDIRECTSOUNDBUFFER audioBuffer(LPDIRECTSOUND dsound)
+{
+    HRESULT err;
+
+    WAVEFORMATEX format = {};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = CHANNELS;
+    format.nSamplesPerSec = SAMPLERATE;
+    format.wBitsPerSample = 32;
+    format.nBlockAlign = (format.nChannels * format.wBitsPerSample) / 8;
+    format.nAvgBytesPerSec = format.nSamplesPerSec *
+            format.nBlockAlign;
+
+    DSBUFFERDESC desc = {};
+    desc.dwSize = sizeof(desc);
+    desc.dwBufferBytes = 3 * format.nAvgBytesPerSec;
+    desc.lpwfxFormat = &format;
+
+    LPDIRECTSOUNDBUFFER buf;
+    err = IDirectSound_CreateSoundBuffer(dsound,
+                &desc, &buf, NULL);
+    verifyDS();
+
+    return buf;
+}
+static void audioWrite(LPDIRECTSOUNDBUFFER buf, void *inData, int length)
+{
+    HRESULT err;
+
+    DWORD playCursor;
+    err = IDirectSoundBuffer_GetCurrentPosition(buf, &playCursor, NULL);
+    verifyDS();
+    
+    void *dataA, *dataB;
+    DWORD lengthA, lengthB;
+    int latency = GAME_SOUND_BUFFER_SIZE;
+    int target = (playCursor + latency) % (3 * 8 * SAMPLERATE);
+    err = IDirectSoundBuffer_Lock(buf, target, length, &dataA, &lengthA, &dataB, &lengthB, 0);
+    verifyDS();
+    
+    if (GAME_SOUND_BUFFER_SIZE <= lengthA)
+    {
+        CopyMemory(dataA, inData, GAME_SOUND_BUFFER_SIZE);
+    } else {
+        CopyMemory(dataA, inData, lengthA);
+        CopyMemory(dataB, inData + lengthA, GAME_SOUND_BUFFER_SIZE - lengthA);
+    }
+
+    err = IDirectSoundBuffer_Unlock(buf, dataA, lengthA, dataB, lengthB);
+    verifyDS();
+
+    err = IDirectSoundBuffer_Play(buf, 0, 0, 0);
+    verifyDS();
+}
+
 static bool running;
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
 {
@@ -204,6 +274,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
     running = true;
     QueryPerformanceFrequency(&freqTime);
     getDeltaTime();
+
+    LPDIRECTSOUND dSound = audioInit();
+    LPDIRECTSOUNDBUFFER sound = audioBuffer(dSound);
 
     int frame = 200;
     while (running)
@@ -302,6 +375,24 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
                     case 'Z':
                         gameFunc.inputSet(game_memory.InputValues, KEY_Z, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
                         break;
+                    case VK_RETURN:
+                        gameFunc.inputSet(game_memory.InputValues, KEY_ENTER, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case VK_SHIFT:
+                        gameFunc.inputSet(game_memory.InputValues, KEY_SHIFT, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case VK_CONTROL:
+                        gameFunc.inputSet(game_memory.InputValues, KEY_CTRL, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case VK_TAB:
+                        gameFunc.inputSet(game_memory.InputValues, KEY_TAB, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case VK_SPACE:
+                        gameFunc.inputSet(game_memory.InputValues, KEY_SPACE, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
+                    case VK_ESCAPE:
+                        gameFunc.inputSet(game_memory.InputValues, KEY_ESC, msg.message == WM_KEYDOWN ? PRESSED : RELEASED);
+                        break;
                     default:
                         break;
                 }
@@ -309,6 +400,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prevInst, LPSTR cmd, int show)
         }
 
         gameFunc.gameLoop(&game_memory);
+        audioWrite(sound, game_memory.soundBuffer, GAME_SOUND_BUFFER_SIZE);
 
         StretchDIBits(context,
             WinOffsetX, WinOffsetY,

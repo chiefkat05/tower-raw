@@ -7,11 +7,10 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <time.h>
-#include <fcntl.h>
-#include <linux/time.h>
 #include <dlfcn.h>
 
 #include "global_definitions.h"
+#include "chiefkat-pulseaudio.h"
 
 #define GAME_LOOP(name) void name(GameMemory *game_mem)
 typedef GAME_LOOP(game_loop);
@@ -21,6 +20,11 @@ GAME_LOOP(gameLoopStub)
 #define INPUT_SET(name) void name(i32 *inputArray, InputCode input, i32 value)
 typedef INPUT_SET(input_set);
 INPUT_SET(inputSetStub)
+{
+}
+#define PIXEL_DATASCALE(name) void name(void *src, int srcw, int srch, void *dest, int destw, int desth)
+typedef PIXEL_DATASCALE(pixel_datascale);
+PIXEL_DATASCALE(pixelDataScaleStub)
 {
 }
 
@@ -42,7 +46,7 @@ static struct timespec currentTime, prevTime;
 GET_DELTATIME(getDeltaTime)
 {
     prevTime = currentTime;
-    clock_gettime(CLOCK_MONOTONIC, &currentTime);
+    clock_gettime(1, &currentTime);
 
     float time_passed = (currentTime.tv_sec - prevTime.tv_sec) * 1000000000 + (currentTime.tv_nsec - prevTime.tv_nsec);
     float delta = time_passed / 1000000000.0f;
@@ -55,6 +59,7 @@ typedef struct
     void *gameLib;
     game_loop *gameLoop;
     input_set *inputSet;
+    pixel_datascale *pixelDataScale;
     bool isValid;
 } gameFunctions;
 static gameFunctions gameFunc;
@@ -73,7 +78,8 @@ static void loadGameCode()
     {
         gameFunc.gameLoop = dlsym(gameFunc.gameLib, "gameLoop");
         gameFunc.inputSet = dlsym(gameFunc.gameLib, "inputSet");
-        gameFunc.isValid = (gameFunc.gameLoop && gameFunc.inputSet);
+        gameFunc.pixelDataScale = dlsym(gameFunc.gameLib, "pixelDataScale");
+        gameFunc.isValid = (gameFunc.gameLoop && gameFunc.inputSet && gameFunc.pixelDataScale);
     }
 
     if (gameFunc.isValid)
@@ -82,6 +88,7 @@ static void loadGameCode()
     printf("game functions not valid\n");
     gameFunc.gameLoop = gameLoopStub;
     gameFunc.inputSet = inputSetStub;
+    gameFunc.pixelDataScale = pixelDataScaleStub;
 }
 static void unloadGameCode()
 {
@@ -93,6 +100,7 @@ static void unloadGameCode()
     gameFunc.isValid = false;
     gameFunc.gameLoop = gameLoopStub;
     gameFunc.inputSet = inputSetStub;
+    gameFunc.pixelDataScale = pixelDataScaleStub;
 }
 
 #define BYTES_PER_PIXEL 4
@@ -181,6 +189,8 @@ int main()
 
     xcb_pixmap_t blackpixmap = xcb_generate_id(connection);
 
+    audioInit();
+
     int currentWinWidth = win_width, currentWinHeight = win_height;
     int frame;
     while (running)
@@ -214,7 +224,12 @@ int main()
             free(reply);
         }
 
-        gameLoop(&game_memory);
+        static int tone = 128;
+        if (game_memory.InputValues[KEY_SPACE] == PRESSED && game_memory.PrevInputValues[KEY_SPACE] == RELEASED)
+        {
+            ++tone;
+        }
+        gameFunc.gameLoop(&game_memory);
 
         /* vertically flip image (this could use optimization) */
         int y = 0, x = 0;
@@ -228,7 +243,7 @@ int main()
             }
         }
 
-        pixelDataScale(screen_data_flipped, game_memory.screen_buffer.width, game_memory.screen_buffer.height,
+        gameFunc.pixelDataScale(screen_data_flipped, game_memory.screen_buffer.width, game_memory.screen_buffer.height,
                         window_buffer, screen_width, screen_height);
         /* make a screenscaled buffer and have it go screenbuf->flipbuf->scalebuf->windowbuf */
 
@@ -241,6 +256,7 @@ int main()
         xcb_flush(connection);
     }
     free(game_memory.data);
+    audioExit();
 
     xcb_free_gc(connection, graphics_context);
     xcb_disconnect(connection);
@@ -260,6 +276,12 @@ static void xcbEventLoop(xcb_connection_t *connection, GameMemory *game_memory)
             /* magic numbers */
             switch(key_event->detail)
             {
+                case 9:
+                    gameFunc.inputSet(game_memory->InputValues, KEY_ESC, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
+                    break;
+                case 23:
+                    gameFunc.inputSet(game_memory->InputValues, KEY_TAB, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
+                    break;
                 case 24:
                     gameFunc.inputSet(game_memory->InputValues, KEY_Q, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
                     break;
@@ -290,6 +312,12 @@ static void xcbEventLoop(xcb_connection_t *connection, GameMemory *game_memory)
                 case 33:
                     gameFunc.inputSet(game_memory->InputValues, KEY_P, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
                     break;
+                case 36:
+                    gameFunc.inputSet(game_memory->InputValues, KEY_ENTER, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
+                    break;
+                case 37:
+                    gameFunc.inputSet(game_memory->InputValues, KEY_CTRL, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
+                    break;
                 case 38:
                     gameFunc.inputSet(game_memory->InputValues, KEY_A, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
                     break;
@@ -317,6 +345,9 @@ static void xcbEventLoop(xcb_connection_t *connection, GameMemory *game_memory)
                 case 46:
                     gameFunc.inputSet(game_memory->InputValues, KEY_L, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
                     break;
+                case 50:
+                    gameFunc.inputSet(game_memory->InputValues, KEY_SHIFT, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
+                    break;
                 case 52:
                     gameFunc.inputSet(game_memory->InputValues, KEY_Z, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
                     break;
@@ -337,6 +368,9 @@ static void xcbEventLoop(xcb_connection_t *connection, GameMemory *game_memory)
                     break;
                 case 58:
                     gameFunc.inputSet(game_memory->InputValues, KEY_M, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
+                    break;
+                case 65:
+                    gameFunc.inputSet(game_memory->InputValues, KEY_SPACE, event->response_type == XCB_KEY_PRESS ? PRESSED : RELEASED);
                     break;
             }
         }

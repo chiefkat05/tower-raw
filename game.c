@@ -18,14 +18,15 @@ typedef struct
     ParticleSystem snow;
     ParticleSystem playerdust;
 
-    SoundStream music;
-    Sound step;
+    bool playerhit;
+    float enemyX, enemyY;
 
     Image plImg;
 
     bool initiated;
 } GameScene;
 
+#include <math.h>
 static void gameInit(GameMemory *game_mem)
 {
     GameScene *scene = (GameScene *)game_mem->data;
@@ -36,12 +37,36 @@ static void gameInit(GameMemory *game_mem)
     particleSystemInit(&scene->snow, PARTICLE_SNOW);
     particleSystemInit(&scene->playerdust, PARTICLE_DUST);
 
-    scene->plImg.sector_x_count = IMAGE_SIDE_SECTOR_COUNT;
-    scene->plImg.sector_y_count = IMAGE_SIDE_SECTOR_COUNT;
+    scene->plImg.sector_x_count = 1;
+    scene->plImg.sector_y_count = 1;
 
     game_mem->readFile("img/img.bmp", scene->plImg.pixel_data, IMAGE_PIXEL_COUNT);
     
     scene->initiated = true;
+}
+
+static void soundSine(GameMemory *game_mem)
+{
+    int tone = 128;
+    int volume = 25;
+    float period = SAMPLERATE / tone;
+
+    volume <<= ((sizeof(i32) * 8) - 8);
+    int i;
+    for (i = 0; i < GAME_SOUND_BUFFER_SIZE; ++i)
+    {
+        float t = 2.0f * PI * game_mem->sineIndex / period;
+        game_mem->soundBuffer[i] = (i32)(sin(t) * volume);
+        ++game_mem->sineIndex;
+    }
+}
+static void soundNone(GameMemory *game_mem)
+{
+    int i;
+    for (i = 0; i < GAME_SOUND_BUFFER_SIZE; ++i)
+    {
+        game_mem->soundBuffer[i] = 0;
+    }
 }
 
 void gameLoop(GameMemory *game_mem)
@@ -51,23 +76,25 @@ void gameLoop(GameMemory *game_mem)
     {
         gameInit(game_mem);
     }
-    /*
-        on gameExit():
-            alcCloseDevice(aDevice);
-            verify(alGetError() == AL_NO_ERROR, "alcCloseDevice failed");
-    */
 
     scene->accumulatedTime += game_mem->getDeltaTime();
 
-    const float speed = 160.0f;
+    float speed = 160.0f, enemySpeed = 0.3f;
     float tspeed = 0.0f;
-    const float gravity = 320.0f;
+    float gravity = 320.0f;
 
     while (scene->accumulatedTime >= TICK_SPEED)
     {
         scene->prevplayerx = scene->playerx;
         scene->prevplayery = scene->playery;
 
+        if (inputGet(game_mem->InputValues, KEY_S))
+        {
+            if (scene->playerfallspeed > 0.0f)
+            { scene->playerfallspeed = 0.0f; }
+            gravity *= 100.0f;
+        }
+        
         if (scene->playery > 60.0)
         {
             scene->playerjumped = true;
@@ -87,6 +114,10 @@ void gameLoop(GameMemory *game_mem)
             scene->playerfallspeed = speed;
             scene->playerjumped = true;
         }
+        if (inputGet(game_mem->InputValues, KEY_SHIFT))
+        {
+            speed *= 2;
+        }
         if (inputGet(game_mem->InputValues, KEY_A))
         {
             tspeed = -speed;
@@ -102,38 +133,45 @@ void gameLoop(GameMemory *game_mem)
         {
             scene->playerfallspeed -= gravity * TICK_SPEED / 2;
         }
-        /*
-        static float timer = 0.0f;
-        timer -= 5000.0f * TICK_SPEED;
-        if (timer <= 0.0f)
+
+        scene->enemyY -= enemySpeed;
+        if (scene->enemyY < 0.0f)
         {
-            timer = 1.0f;
-            particleSystemGenerate(&scene->snow, 1, MAX_PARTICLES, camera_x_position, camera_x_position + game_mem->screen_buffer.width,
-                camera_y_position + game_mem->screen_buffer.height - 1, camera_y_position + game_mem->screen_buffer.height - 1);
+            scene->enemyY = 200.0f;
+            scene->enemyX = scene->playerx;
         }
-        particleSystemUpdate(&scene->snow, &game_mem->screen_buffer);
-        */
+        if ((int)scene->playerx == (int)scene->enemyX && (int)scene->playery == (int)scene->enemyY)
+        {
+            scene->playerhit = true;
+        }
+
         particleSystemUpdate(&scene->playerdust, &game_mem->screen_buffer);
 
         scene->accumulatedTime -= TICK_SPEED;
     }
     clearScreen(&game_mem->screen_buffer);
-    /*
-    camera_x_position = -scene->playerx + game_mem->screen_buffer.width / 2;
-    camera_y_position = -scene->playery + game_mem->screen_buffer.height / 2;
-    */
-   if (scene->playerx < game_mem->screen_buffer.camera_x_position + game_mem->screen_buffer.width / (float)(5.0f/1.5f))
-   {
-    game_mem->screen_buffer.camera_x_position = scene->playerx - game_mem->screen_buffer.width / (float)(5.0f/1.5f);
-   }
-   if (scene->playerx > game_mem->screen_buffer.camera_x_position + game_mem->screen_buffer.width / (float)(5.0f/3.0f))
-   {
-    game_mem->screen_buffer.camera_x_position = scene->playerx - game_mem->screen_buffer.width / (float)(5.0f/3.0f);
-   }
+
+    /* just keep up with handmade hero now that you've done this and fix it when he implements wav files (also make sure linux version is up to par with alsa)  */
+    /*soundSine(game_mem);*/
+    if (scene->playerhit)
+    {
+        soundNone(game_mem);
+        return;
+    }
+    if (scene->playerx < game_mem->screen_buffer.camera_x_position + game_mem->screen_buffer.width / (float)(5.0f/1.5f))
+    {
+        game_mem->screen_buffer.camera_x_position = scene->playerx - game_mem->screen_buffer.width / (float)(5.0f/1.5f);
+    }
+    if (scene->playerx > game_mem->screen_buffer.camera_x_position + game_mem->screen_buffer.width / (float)(5.0f/3.0f))
+    {
+        game_mem->screen_buffer.camera_x_position = scene->playerx - game_mem->screen_buffer.width / (float)(5.0f/3.0f);
+    }
 
     /* player (please fix the pxAlpha and pyAlpha to be not wiggly) */
     /*float pxAlpha = lerp(scene->prevplayerx, scene->playerx, scene->accumulatedTime);
     float pyAlpha = lerp(scene->prevplayery, scene->playery, scene->accumulatedTime);*/
+
+    drawRect(&game_mem->screen_buffer, scene->enemyX, scene->enemyY, 2, 2, 255 << 16);
 
     imageDraw(&game_mem->screen_buffer, &scene->plImg, scene->playerx, scene->playery);
     particleSystemDraw(&scene->playerdust, &game_mem->screen_buffer, scene->accumulatedTime);

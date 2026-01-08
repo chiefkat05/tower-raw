@@ -1,8 +1,6 @@
 #ifndef GLOBAL_DEFINITIONS_H
 #define GLOBAL_DEFINITIONS_H
 
-#include <AL/al.h>
-#include <AL/alc.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -35,11 +33,11 @@ typedef char * str;
 #endif
 
 #ifdef DEBUG
-#define verify(check, msg) crashIfFalse(check, msg, __FILE__, __LINE__)
+#define verify(check, msg) verifyOrCrash(check, msg, __FILE__, __LINE__)
 #else
 #define verify(check, msg)
 #endif
-static void crashIfFalse(bool check, cstr msg, cstr file, u64 line)
+static void verifyOrCrash(bool check, cstr msg, cstr file, u64 line)
 {
     if (check)
     { return; }
@@ -77,48 +75,28 @@ typedef struct
 
 #define SAMPLERATE 44100
 #define CHANNELS 2
-
-#define STREAMBUFFERSIZE SAMPLERATE
-#define SNDBUFFERCOUNT 5
-typedef struct
-{
-    ALuint buffers[SNDBUFFERCOUNT];
-    ALint bufferCursor;
-    ALuint source;
-} SoundStream;
-
-typedef struct
-{
-    ALuint buffer;
-    ALuint source;
-} Sound;
+#define GAME_SOUND_BUFFER_SIZE SAMPLERATE / 15
 
 /* input */
 #define PRESSED 1
 #define RELEASED 0
 typedef enum
 {
+    MOUSE_X, MOUSE_Y, MOUSE_LEFTBUTTON, MOUSE_RIGHTBUTTON,
+    
     KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I,
     KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R,
     KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+    KEY_SHIFT, KEY_CTRL, KEY_TAB, KEY_ESC, KEY_SPACE, KEY_ENTER,
+
+    GAMEPAD_DPAD_UP,
+
+    JOYSTICK_UP,
+
+    /* add support for more input types here, like xbox kinect or eye-tracking devices or whatever other nonsense people play games with */
+    /* TODO: add support for the WII exercise board */
     total_key_count
 } InputCode;
-extern i32 InputValues[total_key_count];
-extern i32 PrevInputValues[total_key_count];
-
-
-/*
-typedef struct
-{
-    int channels;
-    int samplerate;
-    int bitsPerSample;
-    int etc;
-
-    void *data;
-    int dataLength;
-} WavFile;
-*/
 
 /* gfx */
 
@@ -150,9 +128,6 @@ typedef struct
     char bmptext[4];
     u8 *other stuff;
 } BMPheader;
- 
-/* functions */
-void pixelDataScale(void *src, int srcw, int srch, void *dest, int destw, int desth);
 
 /* memory */
 #define READ_FILE(name) void name(char *path, void *out, u64 size)
@@ -174,8 +149,14 @@ typedef struct
     get_deltatime *getDeltaTime;
 
     PixelBuffer screen_buffer;
+
     i32 InputValues[total_key_count];
     i32 PrevInputValues[total_key_count];
+
+    i32 soundBuffer[GAME_SOUND_BUFFER_SIZE];
+    int soundBufferSize;
+
+    int sineIndex;
 } GameMemory;
 
 
